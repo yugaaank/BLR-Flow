@@ -1,0 +1,48 @@
+# Python / Backend
+backend/.venv/
+backend/__pycache__/
+backend/*.pyc
+backend/*.pyo
+backend/*.pyd
+backend/.pytest_cache/
+backend/.coverage
+backend/traffic.db
+backend/traffic.db-journal
+
+# Models & Large Data Files
+# (We ignore heavy datasets and generated models to keep the repo clean)
+*.csv
+*.pkl
+backend/models/*.pkl
+backend/src/unseen_data.json
+ack/dataset/*.csv
+ack/models/*.pkl
+jan to may police violation*.csv
+
+# Node / Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+frontend/.npm/
+frontend/.eslintcache
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment Variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# IDE / OS Files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
