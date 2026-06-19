@@ -335,8 +335,8 @@ export default function LiveDashboard() {
           let newDispatched = ev.isDispatched;
           let newGridlockLogged = ev.isGridlockLogged;
           
-          if (ev.score > 75 && elapsed > 2.5) {
-            if (aiMode && !newDispatched && !ev.policeBusy) {
+          if (elapsed > 2.5) {
+            if (ev.score > 75 && aiMode && !newDispatched && !ev.policeBusy) {
               newDispatched = true;
               setStats(s => ({ ...s, predictedCascades: s.predictedCascades + 1, prevented: s.prevented + 1 }));
               setLogs(logs => [{
@@ -346,7 +346,7 @@ export default function LiveDashboard() {
                 score: ev.score,
                 type: 'dispatch'
               }, ...logs].slice(0, 50));
-            } else if ((!aiMode || (aiMode && ev.policeBusy)) && !newGridlockLogged) {
+            } else if (!newDispatched && !newGridlockLogged) {
               newGridlockLogged = true;
               setStats(s => ({ ...s, predictedCascades: s.predictedCascades + 1, gridlocks: s.gridlocks + 1 }));
               setLogs(logs => [{
@@ -364,7 +364,7 @@ export default function LiveDashboard() {
           if (ev.isDispatched) {
             return (now - ev.createdAt) / 1000 < 12;
           }
-          return true;
+          return (now - ev.createdAt) / 1000 < 12; // Both keep them visible for 12 seconds
         });
       });
     }, 100);
@@ -402,16 +402,8 @@ export default function LiveDashboard() {
       {/* Top Navigation Bar */}
       <div className="absolute top-0 left-0 w-full z-10 bg-white border-b border-gray-200 px-6 py-3 flex justify-between items-center shadow-sm">
         <div className="flex items-center gap-6">
-          <h1 className="font-semibold tracking-tight text-lg text-gray-900">Traffic Operations</h1>
+          <h1 className="font-semibold tracking-tight text-lg text-gray-900">BLR - Flow</h1>
           <div className="h-4 w-px bg-gray-300"></div>
-          <div className="flex items-center gap-2 text-sm text-gray-600 font-medium">
-            <MapPin size={16} className="text-gray-400" />
-            Bangalore District
-          </div>
-          <div className="flex items-center gap-2 text-sm text-gray-600 font-medium">
-            <Activity size={16} className="text-gray-400" />
-            System Live
-          </div>
         </div>
         
         <div className="flex items-center gap-4">
