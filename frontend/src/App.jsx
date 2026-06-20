@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import LiveDashboard from './components/LiveDashboard';
-import { api } from './services/api';
+import { api, API_BASE } from './services/api';
 import { Server, Activity } from 'lucide-react';
 
 function App() {
@@ -24,9 +24,9 @@ function App() {
         if (mounted) {
           setStatus("Warming up ML models on Render...");
           if (err.message.includes("Failed to fetch") || err.message.includes("NetworkError")) {
-            setErrorMsg(`Network Error: Is VITE_API_URL set in Vercel?`);
+            setErrorMsg(`Network Error trying to reach: ${API_BASE}`);
           } else {
-            setErrorMsg(err.message);
+            setErrorMsg(`${err.message} (${API_BASE})`);
           }
           setTimeout(checkHealth, 2000);
         }
