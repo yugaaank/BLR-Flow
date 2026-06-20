@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { api } from "../services/api";
 import { Canvas, useLoader, useThree, useFrame } from '@react-three/fiber';
 import { OrbitControls, Html, Line } from '@react-three/drei';
 import * as THREE from 'three';
-import { MapPin, Activity, AlertCircle, ShieldCheck, CheckCircle2, ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { Activity, AlertCircle, ShieldCheck, CheckCircle2 } from 'lucide-react';
 
 const CASCADE_REASONS = [
   "Spillover",
@@ -233,7 +233,7 @@ function LiveGraph({ graphData, activeEvents, isComplete }) {
 export default function LiveDashboard() {
   const [graphData, setGraphData] = useState({ nodes: [], edges: [] });
   const [activeEvents, setActiveEvents] = useState([]);
-  const activeEventsRef = React.useRef([]);
+  const activeEventsRef = useRef([]);
   const [unseenData, setUnseenData] = useState([]);
   const [logs, setLogs] = useState([]);
   
@@ -242,29 +242,8 @@ export default function LiveDashboard() {
   const [inputDuration, setInputDuration] = useState(60);
   const [timeLeft, setTimeLeft] = useState(60);
   const [isComplete, setIsComplete] = useState(false);
-  const [stats, setStats] = useState({
-    totalViolations: 0,
-    predictedCascades: 0,
-    prevented: 0,
-    gridlocks: 0,
-    lastHour: null,
-    simulatedDays: 1
-  });
+  const [stats, setStats] = useState({ predictedCascades: 0, prevented: 0, gridlocks: 0, simulatedDays: 0, totalViolations: 0 });
   
-  const [currentTimeStr, setCurrentTimeStr] = useState("");
-
-  useEffect(() => {
-    const updateTime = () => {
-      const now = new Date();
-      now.setFullYear(2025);
-      now.setMonth(7); // August
-      now.setDate(20);
-      now.setHours(9, 0, 0, 0);
-      setCurrentTimeStr(now.toLocaleTimeString('en-US', { hour: 'numeric', minute: 'numeric', hour12: true }));
-    };
-    updateTime();
-  }, []);
-
   useEffect(() => {
     api.getNetworkGraph().then(data => setGraphData(data));
     api.getUnseenEvents().then(data => setUnseenData(data));
@@ -426,26 +405,6 @@ export default function LiveDashboard() {
   return (
     <div className="h-screen w-full bg-white flex flex-col font-sans text-slate-900 overflow-hidden">
       
-      {/* Top Navigation Bar */}
-      <div className="h-14 w-full border-b border-slate-200 px-6 flex justify-between items-center shrink-0 bg-white">
-        <div className="flex items-center gap-4">
-          <div className="w-6 h-6 bg-slate-900 flex items-center justify-center">
-            <Activity className="text-white w-3 h-3" />
-          </div>
-          <h1 className="font-display font-bold text-sm tracking-widest uppercase text-slate-900">BLR Flow</h1>
-        </div>
-        
-        <div className="flex items-center gap-6">
-          <div className="text-xs text-slate-500 font-mono uppercase tracking-wider">{currentTimeStr}</div>
-          {isStarted && !isComplete && (
-            <div className="flex items-center gap-2">
-              <div className="w-2 h-2 bg-blue-500 animate-pulse"></div>
-              <span className="text-xs font-mono font-bold text-slate-700">T-MINUS {formatTime(timeLeft)}</span>
-            </div>
-          )}
-        </div>
-      </div>
-
       {/* Main Shell Container */}
       <div className="flex flex-1 overflow-hidden relative">
         
@@ -514,22 +473,30 @@ export default function LiveDashboard() {
               </div>
             </div>
 
-            {/* Footer / System Status */}
-            <div className="mt-auto pt-4 border-t border-slate-200 flex items-center justify-between">
-               <div className="flex items-center gap-2">
-                 <div className={`w-2 h-2 ${isStarted && !isComplete ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`}></div>
-                 <span className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.2em]">
-                   {isStarted && !isComplete ? 'Active' : 'Idle'}
-                 </span>
-               </div>
-               <div className="text-[10px] font-mono font-bold text-slate-400">v1.3.0</div>
-            </div>
 
           </div>
         </div>
 
         {/* Center: 3D Map Area */}
         <div className="flex-1 relative bg-slate-100 z-0 border-r border-slate-200">
+          
+          {/* Dynamic Island */}
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 z-[999] flex items-center bg-white shadow-md border border-slate-200 rounded-full px-3 py-2 transition-all duration-500 ease-out">
+            <div className="flex items-center gap-3 px-3 py-1">
+              <img src="/icon.png" alt="BLR Flow" className="w-6 h-6 object-contain" />
+              <h1 className="font-display font-bold text-sm tracking-[0.2em] uppercase text-slate-900">BLR Flow</h1>
+            </div>
+            
+            {isStarted && !isComplete && (
+              <div className="flex items-center border-l border-slate-200 ml-2 pl-5 pr-3 py-1 gap-4">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse shadow-[0_0_8px_rgba(59,130,246,0.6)]"></div>
+                  <span className="text-xs font-mono font-bold text-slate-700 tracking-widest">T-MINUS {formatTime(timeLeft)}</span>
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className="absolute inset-0">
             <LiveGraph graphData={graphData} activeEvents={activeEvents} isComplete={isComplete} />
           </div>
