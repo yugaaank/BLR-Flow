@@ -7,6 +7,7 @@ function App() {
   const [isReady, setIsReady] = useState(false);
   const [status, setStatus] = useState("Connecting to server...");
   const [progress, setProgress] = useState(0);
+  const [errorMsg, setErrorMsg] = useState("");
 
   useEffect(() => {
     let mounted = true;
@@ -16,11 +17,17 @@ function App() {
         if (mounted) {
           setStatus("Connected! Launching...");
           setProgress(100);
+          setErrorMsg("");
           setTimeout(() => setIsReady(true), 600);
         }
       } catch (err) {
         if (mounted) {
           setStatus("Warming up ML models on Render...");
+          if (err.message.includes("Failed to fetch") || err.message.includes("NetworkError")) {
+            setErrorMsg(`Network Error: Is VITE_API_URL set in Vercel?`);
+          } else {
+            setErrorMsg(err.message);
+          }
           setTimeout(checkHealth, 2000);
         }
       }
@@ -53,12 +60,17 @@ function App() {
           </div>
           <div className="text-center w-full">
             <h2 className="text-xl font-bold text-slate-900 tracking-widest uppercase mb-1">INITIALIZING</h2>
-            <p className="text-xs text-slate-500 flex items-center justify-center gap-2 mb-6 h-4">
+            <p className="text-xs text-slate-500 flex items-center justify-center gap-2 mb-2 h-4">
               {status !== "Connected! Launching..." && (
                 <span className="w-2 h-2 bg-yellow-500 rounded-full animate-ping shrink-0"></span>
               )}
               {status}
             </p>
+            {errorMsg ? (
+              <p className="text-[10px] text-red-500 mb-4 h-4 font-bold">{errorMsg}</p>
+            ) : (
+              <div className="mb-4 h-4"></div>
+            )}
             
             <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden relative border border-slate-200">
               <div 
