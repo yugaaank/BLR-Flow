@@ -40,18 +40,32 @@ clean_df['hour'] = clean_df['created_datetime'].dt.hour
 clean_df['day_of_week'] = clean_df['created_datetime'].dt.dayofweek
 clean_df['is_rush_hour'] = clean_df['hour'].isin([17, 18, 19]).astype(int)
 
-# Baseline
-grouped = clean_df.groupby(['junction_name', 'hour']).size().reset_index(name='count')
-baseline = grouped.groupby('junction_name')['count'].mean().reset_index(name='baseline_avg')
-merged = pd.merge(grouped, baseline, on='junction_name')
-merged['is_anomaly'] = merged['count'] > (1.5 * merged['baseline_avg'])
+# Load true congestion data
+cong_df = pd.read_csv("../Banglore_traffic_Dataset.csv")
+cong_df['Date'] = pd.to_datetime(cong_df['Date']).dt.date
+clean_df['Date'] = clean_df['created_datetime'].dt.date
 
-anomaly_hours = merged[merged['is_anomaly']][['junction_name', 'hour']]
-anomaly_hours['anomaly_flag'] = 1
+unique_junctions = clean_df['junction_name'].unique()
+unique_roads = cong_df['Road/Intersection Name'].unique()
+j2r = {}
+for j in unique_junctions:
+    j_str = str(j).lower()
+    for r in unique_roads:
+        r_str = str(r).lower()
+        if r_str in j_str or j_str in r_str:
+            j2r[j] = r
+            break
 
-clean_df = pd.merge(clean_df, anomaly_hours, on=['junction_name', 'hour'], how='left')
-clean_df['high_impact'] = clean_df['anomaly_flag'].fillna(0).astype(int)
-clean_df = clean_df.drop(columns=['anomaly_flag'])
+clean_df['Road/Intersection Name'] = clean_df['junction_name'].map(j2r)
+
+road_cong = cong_df.groupby(['Date', 'Road/Intersection Name'])['Congestion Level'].mean().reset_index()
+clean_df = pd.merge(clean_df, road_cong, on=['Date', 'Road/Intersection Name'], how='left')
+
+daily_cong = cong_df.groupby('Date')['Congestion Level'].mean().reset_index().rename(columns={'Congestion Level': 'Daily_Avg_Congestion'})
+clean_df = pd.merge(clean_df, daily_cong, on='Date', how='left')
+
+clean_df['Congestion Level'] = clean_df['Congestion Level'].fillna(clean_df['Daily_Avg_Congestion']).fillna(0)
+clean_df['high_impact'] = (clean_df['Congestion Level'] > 75).astype(int)
 
 print(f"High Impact %: {clean_df['high_impact'].mean() * 100:.2f}%")
 
