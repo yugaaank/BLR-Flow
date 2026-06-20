@@ -10,9 +10,7 @@ backend/.coverage
 # Models & Large Data Files
 # (We ignore heavy datasets and generated models to keep the repo clean)
 *.csv
-*.pkl
-backend/models/*.pkl
-backend/src/unseen_data.json
+
 ack/dataset/*.csv
 ack/models/*.pkl
 jan to may police violation*.csv
