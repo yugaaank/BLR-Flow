@@ -36,9 +36,9 @@ yarn-error.log*
 .env.test.local
 .env.production.local
 
-~/BLR-Flow/avoid.md
-~/BLR-Flow/micro.md
-~/BLR-Flow/rules.md
+avoid.md
+micro.md
+rules.md
 
 # IDE / OS Files
 .vscode/
