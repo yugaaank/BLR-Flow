@@ -6,8 +6,6 @@ backend/*.pyo
 backend/*.pyd
 backend/.pytest_cache/
 backend/.coverage
-backend/traffic.db
-backend/traffic.db-journal
 
 # Models & Large Data Files
 # (We ignore heavy datasets and generated models to keep the repo clean)
