@@ -50,3 +50,5 @@ Thumbs.db
 
 # Jupyter Notebooks
 .ipynb_checkpoints/
+backend/clean_violations.csv
+backend/Traffic_Violations.csv
