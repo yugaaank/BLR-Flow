@@ -36,6 +36,10 @@ yarn-error.log*
 .env.test.local
 .env.production.local
 
+avoid.md
+micro.md
+rules.md
+
 # IDE / OS Files
 .vscode/
 .idea/
