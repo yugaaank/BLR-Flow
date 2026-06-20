@@ -3,7 +3,8 @@ import { api } from "../services/api";
 import { Canvas, useLoader, useThree, useFrame } from '@react-three/fiber';
 import { OrbitControls, Html, Line } from '@react-three/drei';
 import * as THREE from 'three';
-import { Activity, AlertCircle, ShieldCheck, CheckCircle2 } from 'lucide-react';
+import { Activity, AlertCircle, ShieldCheck, CheckCircle2, BarChart3, Clock, Zap, TrendingUp, X } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend } from 'recharts';
 
 const CASCADE_REASONS = [
   "Spillover",
@@ -158,7 +159,56 @@ function EventGroup({ event, positions, nodeMap, formattedEdges, isComplete }) {
   );
 }
 
-function LiveGraph({ graphData, activeEvents, isComplete }) {
+function HeatmapOverlay({ heatmapData, positions, nodeMap, onSelectHotspot }) {
+  const maxCount = Math.max(1, ...Object.values(heatmapData).map(d => d.count || 0));
+  return (
+    <group>
+      {Object.entries(heatmapData).map(([name, data]) => {
+        const count = data.count || 0;
+        const id = nodeMap[name];
+        const pos = positions[id];
+        if (!pos || name.includes("NO JUNCTION")) return null;
+        
+        const intensity = count / maxCount; // 0 to 1
+        
+        return (
+          <group key={`heat-${name}`} position={[pos.x, pos.y, 0.1]}>
+            {/* Core */}
+            <mesh>
+              <circleGeometry args={[0.15 + intensity * 0.2, 32]} />
+              <meshBasicMaterial color={intensity > 0.7 ? "#ef4444" : (intensity > 0.3 ? "#f97316" : "#eab308")} transparent opacity={0.9} depthWrite={false} />
+            </mesh>
+            {/* Outer Glow & Hitbox */}
+            <mesh 
+              position={[0,0,-0.01]}
+              onClick={(e) => { e.stopPropagation(); onSelectHotspot({ name, data }); }} 
+              onPointerOver={(e) => { e.stopPropagation(); document.body.style.cursor = 'pointer'; }} 
+              onPointerOut={(e) => { document.body.style.cursor = 'auto'; }}
+            >
+              <circleGeometry args={[0.4 + intensity * 0.6, 32]} />
+              <meshBasicMaterial color={intensity > 0.7 ? "#ef4444" : (intensity > 0.3 ? "#f97316" : "#eab308")} transparent opacity={0.3} depthWrite={false} blending={THREE.AdditiveBlending} />
+            </mesh>
+
+            {intensity > 0.75 && (
+              <Html distanceFactor={25} center zIndexRange={[100, 0]}>
+                <div className="flex flex-col items-center mt-3 pointer-events-none">
+                  <div className="bg-red-600 text-white text-[8px] font-mono font-bold px-1.5 py-0.5 whitespace-nowrap uppercase tracking-widest border border-red-800 shadow-lg">
+                    HOTSPOT: {name}
+                  </div>
+                  <div className="bg-slate-900 text-red-400 text-[7px] font-mono font-bold px-1 py-0.5 whitespace-nowrap uppercase tracking-widest mt-0.5 border border-slate-700 shadow-lg">
+                    ADVISE PATROL
+                  </div>
+                </div>
+              </Html>
+            )}
+          </group>
+        );
+      })}
+    </group>
+  );
+}
+
+function LiveGraph({ graphData, activeEvents, isComplete, showHeatmap, heatmapData, onSelectHotspot }) {
   const { nodes, edges } = graphData;
 
   const { positions, nodeMap } = useMemo(() => {
@@ -201,7 +251,7 @@ function LiveGraph({ graphData, activeEvents, isComplete }) {
       <React.Suspense fallback={null}>
         <MapBackground />
       </React.Suspense>
-      {activeEvents.map(ev => (
+      {!showHeatmap && activeEvents.map(ev => (
         <EventGroup 
           key={ev.id} 
           event={ev} 
@@ -211,6 +261,9 @@ function LiveGraph({ graphData, activeEvents, isComplete }) {
           isComplete={isComplete}
         />
       ))}
+      {showHeatmap && (
+        <HeatmapOverlay heatmapData={heatmapData} positions={positions} nodeMap={nodeMap} onSelectHotspot={onSelectHotspot} />
+      )}
       <OrbitControls 
         makeDefault
         enableDamping={true} 
@@ -242,7 +295,14 @@ export default function LiveDashboard() {
   const [inputDuration, setInputDuration] = useState(60);
   const [timeLeft, setTimeLeft] = useState(60);
   const [isComplete, setIsComplete] = useState(false);
-  const [stats, setStats] = useState({ predictedCascades: 0, prevented: 0, gridlocks: 0, simulatedDays: 0, totalViolations: 0 });
+  const [stats, setStats] = useState({ predictedCascades: 0, prevented: 0, gridlocks: 0, simulatedDays: 0, totalViolations: 0, lastHour: null });
+  const [showReport, setShowReport] = useState(false);
+  const [preventedByType, setPreventedByType] = useState({});
+  const [preventedByCongestionType, setPreventedByCongestionType] = useState({});
+  const [preventedStacked, setPreventedStacked] = useState({});
+  const [showHeatmap, setShowHeatmap] = useState(false);
+  const [heatmapData, setHeatmapData] = useState({});
+  const [selectedHotspot, setSelectedHotspot] = useState(null);
   
   useEffect(() => {
     api.getNetworkGraph().then(data => setGraphData(data));
@@ -281,6 +341,9 @@ export default function LiveDashboard() {
           cascadeJunctions: result.cascade_junctions || [actualJunction],
           score: result.impact_score,
           type: cleanType,
+          congestionType: CASCADE_REASONS[Math.floor(Math.random() * CASCADE_REASONS.length)],
+          time: realEvent.time,
+          date: realEvent.date || "Recurring",
           progress: 0,
           isDispatched: false,
           isGridlockLogged: false,
@@ -307,7 +370,7 @@ export default function LiveDashboard() {
       } catch (err) {
         console.error("Simulation error", err);
       }
-    }, 2000); 
+    }, 100); 
 
     return () => clearInterval(interval);
   }, [graphData, unseenData, isComplete, isStarted]);
@@ -325,38 +388,82 @@ export default function LiveDashboard() {
 
       const nextEvents = activeEventsRef.current.map(ev => {
         const elapsed = (now - ev.createdAt) / 1000;
-        let newProgress = Math.min(elapsed / 2, 1);
+        let newProgress = Math.min(elapsed / 0.5, 1);
         
         let newDispatched = ev.isDispatched;
         let newGridlockLogged = ev.isGridlockLogged;
         
-        if (elapsed > 2.5) {
+        if (elapsed > 0.6) {
           if (ev.score > 75 && aiMode && !newDispatched && !ev.policeBusy) {
             newDispatched = true;
             preventsToAdd++;
+            setHeatmapData(prev => {
+              const current = prev[ev.violatedJunction] || { count: 0, types: {}, congestionTypes: {}, times: {}, dates: {}, avgScore: 0 };
+              return {
+                ...prev,
+                [ev.violatedJunction]: {
+                  ...current,
+                  count: current.count + 1,
+                  types: { ...current.types, [ev.type]: (current.types[ev.type] || 0) + 1 },
+                  congestionTypes: { ...(current.congestionTypes || {}), [ev.congestionType]: ((current.congestionTypes || {})[ev.congestionType] || 0) + 1 },
+                  times: { ...(current.times || {}), [ev.time]: ((current.times || {})[ev.time] || 0) + 1 },
+                  dates: { ...(current.dates || {}), [ev.date]: ((current.dates || {})[ev.date] || 0) + 1 },
+                  avgScore: ((current.avgScore * current.count) + ev.score) / (current.count + 1)
+                }
+              };
+            });
             newLogs.push({
               id: ev.id + '-dispatch',
               time: new Date().toLocaleTimeString(),
               msg: `Unit dispatched to ${ev.violatedJunction}`,
               score: ev.score,
-              type: 'dispatch'
+              type: 'dispatch',
+              violation_type: ev.type
+            });
+            setPreventedByType(prev => ({
+              ...prev,
+              [ev.type]: (prev[ev.type] || 0) + 1
+            }));
+            setPreventedByCongestionType(prev => ({
+              ...prev,
+              [ev.congestionType]: (prev[ev.congestionType] || 0) + 1
+            }));
+            setPreventedStacked(prev => {
+              const current = prev[ev.type] || { name: ev.type, "Spillover": 0, "Signal Blocked": 0, "Chokepoint": 0, "Lane Blocked": 0 };
+              return { ...prev, [ev.type]: { ...current, [ev.congestionType]: (current[ev.congestionType] || 0) + 1 } };
             });
           } else if (!newDispatched && !newGridlockLogged) {
             newGridlockLogged = true;
             gridsToAdd++;
+            setHeatmapData(prev => {
+              const current = prev[ev.violatedJunction] || { count: 0, types: {}, congestionTypes: {}, times: {}, dates: {}, avgScore: 0 };
+              return {
+                ...prev,
+                [ev.violatedJunction]: {
+                  ...current,
+                  count: current.count + 1,
+                  types: { ...current.types, [ev.type]: (current.types[ev.type] || 0) + 1 },
+                  congestionTypes: { ...(current.congestionTypes || {}), [ev.congestionType]: ((current.congestionTypes || {})[ev.congestionType] || 0) + 1 },
+                  times: { ...(current.times || {}), [ev.time]: ((current.times || {})[ev.time] || 0) + 1 },
+                  dates: { ...(current.dates || {}), [ev.date]: ((current.dates || {})[ev.date] || 0) + 1 },
+                  avgScore: ((current.avgScore * current.count) + ev.score) / (current.count + 1)
+                }
+              };
+            });
             newLogs.push({
               id: ev.id + '-gridlock',
               time: new Date().toLocaleTimeString(),
               msg: `Cascade observed at ${ev.violatedJunction}`,
               score: ev.score,
-              type: 'gridlock'
+              type: 'gridlock',
+              violation_type: ev.type
             });
           }
         }
 
         return { ...ev, progress: newProgress, isDispatched: newDispatched, isGridlockLogged: newGridlockLogged };
       }).filter(ev => {
-        return (now - ev.createdAt) / 1000 < 12;
+        return (now - ev.createdAt) / 1000 < 1.5;
       });
 
       // Update ref and state once
@@ -471,6 +578,18 @@ export default function LiveDashboard() {
                   ></div>
                 </div>
               </div>
+
+              {isComplete && (
+                <div className="mt-8 border-t border-slate-200 pt-6">
+                  <button 
+                    onClick={() => setShowHeatmap(!showHeatmap)}
+                    className={`w-full font-bold text-xs uppercase tracking-widest py-3 px-4 transition-colors flex items-center justify-center gap-2 border ${showHeatmap ? 'bg-slate-100 border-slate-300 text-slate-900' : 'bg-slate-900 hover:bg-slate-800 text-white border-slate-900'}`}
+                  >
+                    {showHeatmap ? 'Return to Grid View' : 'Show Map Analysis'}
+                  </button>
+                  {!showHeatmap && <p className="text-[10px] text-slate-500 mt-2 text-center">Analyze patrol hotspots based on simulation.</p>}
+                </div>
+              )}
             </div>
 
 
@@ -495,11 +614,91 @@ export default function LiveDashboard() {
                 </div>
               </div>
             )}
+            
+            {showHeatmap && (
+              <div className="flex items-center border-l border-slate-200 ml-2 pl-5 pr-3 py-1 gap-4">
+                <div className="text-xs font-mono font-bold text-red-600 tracking-widest uppercase">Hotspot Analysis Mode</div>
+              </div>
+            )}
           </div>
 
           <div className="absolute inset-0">
-            <LiveGraph graphData={graphData} activeEvents={activeEvents} isComplete={isComplete} />
+            <LiveGraph graphData={graphData} activeEvents={activeEvents} isComplete={isComplete} showHeatmap={showHeatmap} heatmapData={heatmapData} onSelectHotspot={setSelectedHotspot} />
           </div>
+
+          {/* Hotspot Info Panel */}
+          {showHeatmap && selectedHotspot && (
+            <div className="absolute right-6 top-6 w-80 bg-white border border-slate-200 shadow-2xl z-[1000] flex flex-col animate-in fade-in slide-in-from-right-8 duration-300">
+              <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex justify-between items-center">
+                <div className="flex items-center gap-2">
+                  <AlertCircle size={16} className="text-red-600" />
+                  <span className="text-[10px] font-bold text-slate-900 uppercase tracking-widest">Patrol Dossier</span>
+                </div>
+                <button onClick={() => setSelectedHotspot(null)} className="text-slate-400 hover:text-slate-900 transition-colors"><X size={16} /></button>
+              </div>
+              <div className="p-5 flex flex-col gap-4">
+                <div>
+                  <h3 className="font-display font-bold text-lg text-slate-900 leading-tight">{selectedHotspot.name}</h3>
+                  <p className="text-[10px] text-slate-500 uppercase tracking-widest mt-1">Critical Intervention Zone</p>
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="border border-slate-200 p-3 bg-slate-50">
+                    <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1">Incidents</div>
+                    <div className="font-mono text-xl text-slate-900">{selectedHotspot.data.count}</div>
+                  </div>
+                  <div className="border border-slate-200 p-3 bg-slate-50">
+                    <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1">Avg Risk</div>
+                    <div className="font-mono text-xl text-red-600">{Math.round(selectedHotspot.data.avgScore)}</div>
+                  </div>
+                  <div className="border border-slate-200 p-3 bg-slate-50">
+                    <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1">Peak Time</div>
+                    <div className="font-mono text-xl text-slate-900">
+                      {(() => {
+                        const pt = Object.entries(selectedHotspot.data.times || {}).sort((a,b)=>b[1]-a[1])[0]?.[0];
+                        return pt ? pt.split(':')[0] + ':00' : "N/A";
+                      })()}
+                    </div>
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-2 border-b border-slate-200 pb-2">Violation Demographics</div>
+                  <ul className="space-y-2 mt-3">
+                    {Object.entries(selectedHotspot.data.types).sort((a,b)=>b[1]-a[1]).map(([t, c]) => (
+                      <li key={t} className="flex justify-between items-center text-xs">
+                        <span className="text-slate-700 font-medium">{t}</span>
+                        <span className="font-mono font-bold text-slate-900 bg-slate-200 px-2 py-0.5">{c}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div>
+                  <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-2 border-b border-slate-200 pb-2 mt-2">Congestion Causes</div>
+                  <ul className="space-y-2 mt-3">
+                    {Object.entries(selectedHotspot.data.congestionTypes || {}).sort((a,b)=>b[1]-a[1]).map(([t, c]) => (
+                      <li key={t} className="flex justify-between items-center text-xs">
+                        <span className="text-slate-700 font-medium">{t}</span>
+                        <span className="font-mono font-bold text-red-900 bg-red-100 px-2 py-0.5">{c}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div className="mt-2 bg-red-50 border border-red-200 p-3 text-xs text-red-900 leading-relaxed shadow-sm">
+                  <strong>Recommendation:</strong> {
+                    (() => {
+                      const c = selectedHotspot.data.count;
+                      const s = selectedHotspot.data.avgScore;
+                      const t = Object.entries(selectedHotspot.data.types).sort((a,b)=>b[1]-a[1])[0]?.[0] || "violations";
+                      
+                      if (c >= 10 && s >= 82) return <span>This junction poses an extreme, chronic risk of city-wide cascading gridlock primarily driven by <strong>{t}</strong>. Immediate assignment of a permanent static patrol unit is required.</span>;
+                      if (c >= 10 && s < 82) return <span>High volume of <strong>{t}</strong> incidents recorded. While individual impact is moderate, the sheer volume guarantees regular congestion. Advise installing automated enforcement cameras.</span>;
+                      if (c < 10 && s >= 82) return <span>Though less frequent, <strong>{t}</strong> incidents at this junction have an extremely high probability of triggering massive gridlock. Advise rapid-response readiness during peak hours.</span>;
+                      return <span>Occasional <strong>{t}</strong> incidents noted with moderate risk. Add to standard patrol sweep schedules to prevent escalation.</span>;
+                    })()
+                  }
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Right Sidebar: Event Feeds */}
@@ -518,9 +717,15 @@ export default function LiveDashboard() {
 
                <button 
                  onClick={() => window.location.reload()} 
-                 className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs uppercase tracking-widest py-3 px-4 transition-colors"
+                 className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs uppercase tracking-widest py-3 px-4 mb-2 transition-colors"
                >
                  Restart Simulation
+               </button>
+               <button 
+                 onClick={() => setShowReport(true)} 
+                 className="w-full border border-slate-900 text-slate-900 hover:bg-slate-100 font-bold text-xs uppercase tracking-widest py-3 px-4 transition-colors flex items-center justify-center gap-2"
+               >
+                 <BarChart3 size={14} /> Detailed Explanation
                </button>
             </div>
           )}
@@ -607,6 +812,148 @@ export default function LiveDashboard() {
             >
               {isLoadingData ? 'Connecting to Grid...' : 'Start Trial'}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* DETAILED REPORT MODAL */}
+      {showReport && (
+        <div className="absolute inset-0 z-[1000] bg-slate-900/60 flex items-center justify-center p-6">
+          <div className="bg-white w-full max-w-6xl max-h-[95vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
+            {/* Header */}
+            <div className="flex justify-between items-center px-8 py-6 border-b border-slate-200 bg-slate-50 shrink-0">
+              <div className="flex items-center gap-3">
+                <CheckCircle2 size={24} className="text-emerald-600" />
+                <h2 className="font-display text-xl font-bold text-slate-900 uppercase tracking-widest">Post-Trial Report</h2>
+              </div>
+              <button onClick={() => setShowReport(false)} className="p-2 hover:bg-slate-200 text-slate-500 hover:text-slate-900 transition-colors">
+                <X size={24} />
+              </button>
+            </div>
+            
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto p-8 custom-scrollbar bg-slate-100">
+              
+              {/* Premium KPI Section */}
+              <div className="grid grid-cols-4 gap-6 mb-8">
+                
+                {/* Main Metric */}
+                <div className="bg-white border border-slate-200 p-6 col-span-2 shadow-sm flex flex-col justify-center relative overflow-hidden">
+                  <div className="absolute -right-6 top-1/2 -translate-y-1/2 opacity-5 text-slate-900 pointer-events-none">
+                    <ShieldCheck size={180} />
+                  </div>
+                  <div className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest mb-2 flex items-center gap-2 relative z-10">
+                    <div className="w-2 h-2 bg-emerald-500" />
+                    Cascades Neutralized
+                  </div>
+                  <div className="flex items-baseline gap-2 relative z-10">
+                    <span className="font-mono text-6xl font-bold text-slate-900">{stats.prevented}</span>
+                    <span className="font-mono text-xl text-slate-400">/ {stats.predictedCascades}</span>
+                  </div>
+                  <div className="mt-2 text-sm text-slate-500 font-medium relative z-10">Total high-risk cascade events successfully intercepted.</div>
+                </div>
+
+                {/* Secondary Metrics Grid */}
+                <div className="bg-white border border-slate-200 p-6 shadow-sm flex flex-col justify-center">
+                  <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 flex items-center gap-2">
+                    <Clock size={14} className="text-blue-600" /> Time Saved
+                  </div>
+                  <div className="font-mono text-4xl text-slate-900">{stats.prevented * 45}<span className="text-lg text-slate-400 ml-1">m</span></div>
+                </div>
+                  
+                <div className="bg-white border border-slate-200 p-6 shadow-sm flex flex-col justify-center">
+                  <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 flex items-center gap-2">
+                    <TrendingUp size={14} className="text-amber-600" /> Avg Speed
+                  </div>
+                  <div className="font-mono text-4xl text-slate-900">{Math.round(12 + ((stats.prevented / Math.max(1, stats.predictedCascades)) * 14))}<span className="text-lg text-slate-400 ml-1">km/h</span></div>
+                </div>
+
+                <div className="bg-white border border-slate-200 p-6 shadow-sm flex flex-col justify-center col-span-4">
+                  <div className="flex justify-between items-center mb-3">
+                    <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                      <Zap size={14} className="text-purple-600" /> System Efficiency
+                    </div>
+                    <span className="font-mono text-sm font-bold text-emerald-600">{Math.round((stats.prevented / Math.max(1, stats.predictedCascades)) * 100)}%</span>
+                  </div>
+                  <div className="h-2 w-full bg-slate-200 overflow-hidden">
+                    <div className="h-full bg-slate-900 transition-all duration-1000" style={{ width: `${Math.round((stats.prevented / Math.max(1, stats.predictedCascades)) * 100)}%` }} />
+                  </div>
+                </div>
+              </div>
+
+              {/* Charts Section */}
+              <div className="grid grid-cols-3 gap-6">
+                
+                {/* Stacked Bar - Takes 2 cols */}
+                <div className="col-span-2 bg-white border border-slate-200 p-6 shadow-sm">
+                  <h3 className="font-display text-sm font-bold text-slate-900 uppercase tracking-widest mb-6">Violation / Congestion Cross-Analysis</h3>
+                  <div className="h-[280px] w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={Object.values(preventedStacked).sort((a,b) => {
+                        const sumA = a["Spillover"] + a["Signal Blocked"] + a["Chokepoint"] + a["Lane Blocked"];
+                        const sumB = b["Spillover"] + b["Signal Blocked"] + b["Chokepoint"] + b["Lane Blocked"];
+                        return sumB - sumA;
+                      }).slice(0, 8)} margin={{ top: 0, right: 0, left: -20, bottom: 0 }} barSize={32}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                        <XAxis dataKey="name" tick={{fontSize: 10, fill: '#475569', fontWeight: 'bold'}} axisLine={false} tickLine={false} />
+                        <YAxis tick={{fontSize: 10, fill: '#475569', fontWeight: 'bold'}} axisLine={false} tickLine={false} />
+                        <RechartsTooltip cursor={{fill: '#f1f5f9'}} contentStyle={{backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '0px', color: '#0f172a', fontSize: '12px', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}} itemStyle={{color: '#0f172a'}} />
+                        <Legend iconType="square" wrapperStyle={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', paddingTop: '20px' }} />
+                        <Bar dataKey="Spillover" stackId="a" fill="#3b82f6" />
+                        <Bar dataKey="Signal Blocked" stackId="a" fill="#f59e0b" />
+                        <Bar dataKey="Chokepoint" stackId="a" fill="#10b981" />
+                        <Bar dataKey="Lane Blocked" stackId="a" fill="#8b5cf6" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+
+                {/* Pie Chart & Delay Chart Stacked Vertically */}
+                <div className="flex flex-col gap-6">
+                  <div className="bg-white border border-slate-200 p-6 shadow-sm flex-1 flex flex-col">
+                    <h3 className="font-display text-sm font-bold text-slate-900 uppercase tracking-widest mb-2">Congestion Dist.</h3>
+                    <div className="flex-1 w-full min-h-[120px] relative">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie
+                            data={Object.entries(preventedByCongestionType).map(([name, value]) => ({ name, value }))}
+                            cx="50%" cy="50%" innerRadius="60%" outerRadius="80%" paddingAngle={2} dataKey="value" stroke="none"
+                          >
+                            {Object.entries(preventedByCongestionType).map((entry, index) => {
+                              const colors = ['#3b82f6', '#f59e0b', '#10b981', '#8b5cf6'];
+                              return <Cell key={`cell-${index}`} fill={colors[index % colors.length]} />;
+                            })}
+                          </Pie>
+                          <RechartsTooltip contentStyle={{backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '0px', color: '#0f172a', fontSize: '12px', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}} itemStyle={{color: '#0f172a'}} />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  <div className="bg-white border border-slate-200 p-6 shadow-sm flex-1 flex flex-col">
+                    <h3 className="font-display text-sm font-bold text-slate-900 uppercase tracking-widest mb-4">Total Delay (Mins)</h3>
+                    <div className="flex-1 w-full min-h-[120px]">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={[
+                          { name: 'Base', delay: stats.predictedCascades * 45 },
+                          { name: 'AI', delay: stats.gridlocks * 45 }
+                        ]} margin={{ top: 0, right: 0, left: -20, bottom: 0 }} barSize={40}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                          <XAxis dataKey="name" tick={{fontSize: 10, fill: '#475569', fontWeight: 'bold'}} axisLine={false} tickLine={false} />
+                          <YAxis tick={{fontSize: 10, fill: '#475569', fontWeight: 'bold'}} axisLine={false} tickLine={false} />
+                          <RechartsTooltip cursor={{fill: '#f1f5f9'}} contentStyle={{backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '0px', color: '#0f172a', fontSize: '12px', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}} formatter={(value) => [`${value}m`, 'Delay']} />
+                          <Bar dataKey="delay">
+                            <Cell fill="#ef4444" />
+                            <Cell fill="#10b981" />
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            </div>
           </div>
         </div>
       )}
